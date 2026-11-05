@@ -10678,6 +10678,7 @@ __metadata:
     "@strapi/design-system": "npm:2.3.0"
     "@strapi/icons": "npm:2.3.0"
     "@strapi/strapi": "npm:5.61.0"
+    "@strapi/types": "npm:5.61.0"
     "@types/node": "npm:22.20.0"
     react: "npm:18.3.1"
     react-dom: "npm:18.3.1"
