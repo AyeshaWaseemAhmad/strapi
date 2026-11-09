@@ -123,25 +123,28 @@ type Data = Record<string, unknown>;
  * The params of a core service `create`, with strict types. The core service calls the Document
  * Service with `{ status: 'published', ...params }` (`core-api/service/core-service.ts:2-7` in
  * `@strapi/core`), so `data` follows the published write rules ({@link CreateInput}) unless the
- * params pass `status: 'draft'`.
+ * params pass `status: 'draft'`. `lookup` is typed `undefined` (see {@link NoLookup}).
  */
 type CreateParams<TContentTypeUID extends UID.ContentType> = ReadParams<TContentTypeUID> &
   (
     | { status?: 'published'; data: CreateInput<TContentTypeUID, 'published'> }
     | { status: 'draft'; data: CreateInput<TContentTypeUID, 'draft'> }
-  );
+  ) &
+  NoLookup;
 
 /**
  * The params of a core service `update` (collection type) or `createOrUpdate` (single type), with
  * strict types. As for {@link CreateParams}, the core service defaults `status` to `'published'`, so
  * `data` follows the published update rules ({@link UpdateInput}) unless the params pass
  * `status: 'draft'`: every key is optional, and `null` is accepted where the validator accepts it.
+ * `lookup` is typed `undefined` (see {@link NoLookup}).
  */
 type UpdateParams<TContentTypeUID extends UID.ContentType> = ReadParams<TContentTypeUID> &
   (
     | { status?: 'published'; data: UpdateInput<TContentTypeUID, 'published'> }
     | { status: 'draft'; data: UpdateInput<TContentTypeUID, 'draft'> }
-  );
+  ) &
+  NoLookup;
 
 /**
  * Base Core-API service type

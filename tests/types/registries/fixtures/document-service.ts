@@ -358,6 +358,63 @@ void articleService.find({ fields: ['title'], lookup: { locale: 'fr' } });
 // @ts-expect-error `findFirst` reads one entry: its `locale` is a single code.
 void homepageService.find({ fields: ['title'], locale: ['fr', 'en'] });
 
+// The core service writes pass their params to the Document Service's `create` and `update`, which
+// take `data`, `fields`, `populate`, `locale` and `status`. They stay accepted, as literals and
+// through variables.
+const coreCreated = articleService.create({
+  data: { title: 'Title' },
+  fields: ['title'],
+  populate: ['category'],
+  locale: 'fr',
+});
+void articleService.create({ data: { views: 1 }, status: 'draft', locale: 'fr' });
+const coreUpdated = articleService.update('a', {
+  data: { views: 1 },
+  fields: ['title'],
+  populate: ['category'],
+  status: 'draft',
+  locale: 'fr',
+});
+const coreUpserted = homepageService.createOrUpdate({
+  data: { title: 'Title' },
+  fields: ['title'],
+  locale: 'fr',
+});
+const createParams = { data: { title: 'Title' }, status: 'published', locale: 'fr' } as const;
+const updateParams = { data: { views: 1 }, status: 'draft', locale: 'fr' } as const;
+const upsertParams = { data: { title: 'Title' }, locale: 'fr' };
+void articleService.create(createParams);
+void articleService.update('a', updateParams);
+void homepageService.createOrUpdate(upsertParams);
+declare const coreWriteChecks: [
+  Expect<Equal<keyof Awaited<typeof coreCreated>, 'id' | 'documentId' | 'title' | 'category'>>,
+  Expect<
+    Equal<
+      keyof NonNullable<Awaited<typeof coreUpdated>>,
+      'id' | 'documentId' | 'title' | 'category'
+    >
+  >,
+  Expect<Equal<keyof NonNullable<Awaited<typeof coreUpserted>>, 'id' | 'documentId' | 'title'>>,
+];
+coreWriteChecks satisfies unknown;
+
+// The core service writes reject `lookup` too: the Document Service's `create` and `update` throw
+// on one from the caller.
+// @ts-expect-error The Document Service builds `lookup` itself and rejects one from the caller.
+void articleService.create({ data: { title: 'Title' }, lookup: { locale: 'fr' } });
+// @ts-expect-error The Document Service builds `lookup` itself and rejects one from the caller.
+void articleService.update('a', { data: { views: 1 }, lookup: { locale: 'fr' } });
+// @ts-expect-error The Document Service builds `lookup` itself and rejects one from the caller.
+void homepageService.createOrUpdate({ data: { title: 'Title' }, lookup: { locale: 'fr' } });
+const createWithLookup = { data: { title: 'Title' }, lookup: { locale: 'fr' } };
+const updateWithLookup = { data: { views: 1 }, lookup: { locale: 'fr' } };
+// @ts-expect-error The Document Service builds `lookup` itself and rejects one from the caller.
+void articleService.create(createWithLookup);
+// @ts-expect-error The Document Service builds `lookup` itself and rejects one from the caller.
+void articleService.update('a', updateWithLookup);
+// @ts-expect-error The Document Service builds `lookup` itself and rejects one from the caller.
+void homepageService.createOrUpdate(createWithLookup);
+
 // Known gap (filters): filter values are not checked against the attribute type. This compiles,
 // so it is not an `@ts-expect-error` case.
 void articles.findMany({ filters: { views: { $eq: 'not a number' } } });
