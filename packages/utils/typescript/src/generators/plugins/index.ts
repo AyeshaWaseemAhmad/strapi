@@ -159,6 +159,136 @@ const relativeImport = (filename: string, containingFile: string) => {
   return relative.startsWith('../') ? relative : `./${relative}`;
 };
 
+type ResolutionContext = {
+  options: GeneratorOptions;
+  containingFile: string;
+  compilerOptions: ts.CompilerOptions;
+  modernOptions: ts.CompilerOptions;
+  dependencies: Record<string, unknown>;
+  bundledPackages: Set<string>;
+};
+
+type PluginImport = { declaration: string; specifier: string };
+
+/** The first candidate that resolves to a declaration inside the plugin directory, if any. */
+const findDeclaration = (
+  candidates: string[],
+  containingFile: string,
+  compilerOptions: ts.CompilerOptions,
+  pluginDirectory: string
+): PluginImport | undefined => {
+  for (const candidate of candidates) {
+    const declaration = resolveDeclaration(
+      candidate,
+      containingFile,
+      compilerOptions,
+      pluginDirectory
+    );
+    if (declaration !== undefined) {
+      return { declaration, specifier: candidate };
+    }
+  }
+
+  return undefined;
+};
+
+/** Finds a server declaration the app's resolver cannot reach through a package specifier. */
+const findFallbackDeclaration = (
+  plugin: EnabledPlugin,
+  candidates: string[],
+  pluginDirectory: string,
+  context: ResolutionContext
+): string | undefined => {
+  const { containingFile, compilerOptions, modernOptions } = context;
+
+  // Legacy Node resolution ignores package exports. Resolve only the server export with
+  // modern resolution, then reference its declaration directly using the app's resolver.
+  const exported = findDeclaration(candidates, containingFile, modernOptions, pluginDirectory);
+  if (exported !== undefined) {
+    return exported.declaration;
+  }
+
+  // Configured local plugins may have no node_modules entry. Package self-references
+  // still resolve their server exports from inside the plugin directory.
+  if (plugin.packageInfo?.name !== undefined) {
+    const selfReference = resolveDeclaration(
+      `${plugin.packageInfo.name}/strapi-server`,
+      path.join(pluginDirectory, 'package.json'),
+      modernOptions,
+      pluginDirectory
+    );
+    if (selfReference !== undefined) {
+      return selfReference;
+    }
+  }
+
+  return resolveDeclaration(
+    path.join(pluginDirectory, 'strapi-server'),
+    containingFile,
+    compilerOptions,
+    pluginDirectory
+  );
+};
+
+/** Resolves a plugin's server declaration and the specifier the generated file imports it by. */
+const resolvePluginImport = (
+  plugin: EnabledPlugin,
+  pluginDirectory: string,
+  context: ResolutionContext
+): PluginImport | undefined => {
+  const { containingFile, compilerOptions, dependencies } = context;
+  const packageNames = new Set([
+    plugin.packageInfo?.name,
+    plugin.info?.packageName,
+    ...Object.keys(dependencies),
+  ]);
+  const candidates = [...packageNames]
+    .filter((packageName): packageName is string => typeof packageName === 'string')
+    .sort(compareCodeUnits)
+    .map((packageName) => `${packageName}/strapi-server`);
+
+  const direct = findDeclaration(candidates, containingFile, compilerOptions, pluginDirectory);
+  if (direct !== undefined) {
+    return direct;
+  }
+
+  const declaration = findFallbackDeclaration(plugin, candidates, pluginDirectory, context);
+  if (declaration === undefined) {
+    return undefined;
+  }
+
+  const relative = relativeImport(declaration, containingFile);
+  return resolveDeclaration(relative, containingFile, compilerOptions, pluginDirectory) ===
+    declaration
+    ? { declaration, specifier: relative }
+    : undefined;
+};
+
+/** The import of an enabled plugin's server declaration, unless the plugin is not imported. */
+const importPlugin = (
+  name: string,
+  plugin: EnabledPlugin,
+  context: ResolutionContext
+): PluginImport | undefined => {
+  const { options, bundledPackages } = context;
+  if (
+    plugin.enabled !== true ||
+    Object.hasOwn(options.strapi.plugins, name) === false ||
+    plugin.pathToPlugin === undefined ||
+    ts.sys.directoryExists(plugin.pathToPlugin) === false
+  ) {
+    return undefined;
+  }
+
+  const pluginPackageName = plugin.packageInfo?.name ?? plugin.info?.packageName;
+  if (pluginPackageName !== undefined && bundledPackages.has(pluginPackageName) === true) {
+    options.logger.debug(`Skipping ${name}: @strapi/strapi/strict-types loads its contracts.`);
+    return undefined;
+  }
+
+  return resolvePluginImport(plugin, path.resolve(plugin.pathToPlugin), context);
+};
+
 /** Imports the server declarations of enabled, loaded plugins without enabling strict typing. */
 export const generatePluginDefinitions = async (options: GeneratorOptions) => {
   const { strapi } = options;
@@ -176,98 +306,35 @@ export const generatePluginDefinitions = async (options: GeneratorOptions) => {
   const dependencies: Record<string, unknown> = strapi.config.get('info.dependencies', {});
   const importsByDeclaration = new Map<string, string>();
   const bundledPackages = readBundledPackages(containingFile, [compilerOptions, modernOptions]);
+  const context: ResolutionContext = {
+    options,
+    containingFile,
+    compilerOptions,
+    modernOptions,
+    dependencies,
+    bundledPackages,
+  };
 
   for (const [name, plugin] of Object.entries(enabledPlugins).sort(([a], [b]) =>
     compareCodeUnits(a, b)
   )) {
-    if (
-      plugin.enabled !== true ||
-      Object.hasOwn(strapi.plugins, name) === false ||
-      plugin.pathToPlugin === undefined ||
-      ts.sys.directoryExists(plugin.pathToPlugin) === false
-    ) {
+    const pluginImport = importPlugin(name, plugin, context);
+    if (pluginImport === undefined) {
       continue;
     }
 
-    const pluginPackageName = plugin.packageInfo?.name ?? plugin.info?.packageName;
-    if (pluginPackageName !== undefined && bundledPackages.has(pluginPackageName) === true) {
-      options.logger.debug(`Skipping ${name}: @strapi/strapi/strict-types loads its contracts.`);
-      continue;
-    }
-
-    const pluginDirectory = path.resolve(plugin.pathToPlugin);
-    const packageNames = new Set([
-      plugin.packageInfo?.name,
-      plugin.info?.packageName,
-      ...Object.keys(dependencies),
-    ]);
-    const candidates = [...packageNames]
-      .filter((packageName): packageName is string => typeof packageName === 'string')
-      .sort(compareCodeUnits)
-      .map((packageName) => `${packageName}/strapi-server`);
-
-    let declaration: string | undefined;
-    let specifier: string | undefined;
-    for (const candidate of candidates) {
-      declaration = resolveDeclaration(candidate, containingFile, compilerOptions, pluginDirectory);
-      if (declaration !== undefined) {
-        specifier = candidate;
-        break;
-      }
-    }
-
-    if (declaration === undefined) {
-      // Legacy Node resolution ignores package exports. Resolve only the server export with
-      // modern resolution, then reference its declaration directly using the app's resolver.
-      for (const candidate of candidates) {
-        declaration = resolveDeclaration(candidate, containingFile, modernOptions, pluginDirectory);
-        if (declaration !== undefined) {
-          break;
-        }
-      }
-
-      // Configured local plugins may have no node_modules entry. Package self-references
-      // still resolve their server exports from inside the plugin directory.
-      if (declaration === undefined && plugin.packageInfo?.name !== undefined) {
-        declaration = resolveDeclaration(
-          `${plugin.packageInfo.name}/strapi-server`,
-          path.join(pluginDirectory, 'package.json'),
-          modernOptions,
-          pluginDirectory
-        );
-      }
-
-      declaration ??= resolveDeclaration(
-        path.join(pluginDirectory, 'strapi-server'),
-        containingFile,
-        compilerOptions,
-        pluginDirectory
+    const { declaration, specifier } = pluginImport;
+    const strictOptIn = readStrictOptIn(declaration);
+    if (strictOptIn !== undefined) {
+      options.logger.warn(
+        `The server declaration of ${name} ${strictOptIn}, which turns strict types on for every application that installs it. Report it to the plugin author.`
       );
-
-      if (declaration !== undefined) {
-        const relative = relativeImport(declaration, containingFile);
-        if (
-          resolveDeclaration(relative, containingFile, compilerOptions, pluginDirectory) ===
-          declaration
-        ) {
-          specifier = relative;
-        }
-      }
     }
 
-    if (declaration !== undefined && specifier !== undefined) {
-      const strictOptIn = readStrictOptIn(declaration);
-      if (strictOptIn !== undefined) {
-        options.logger.warn(
-          `The server declaration of ${name} ${strictOptIn}, which turns strict types on for every application that installs it. Report it to the plugin author.`
-        );
-      }
-
-      const identity = realpath(declaration);
-      const previous = importsByDeclaration.get(identity);
-      if (previous === undefined || specifier < previous) {
-        importsByDeclaration.set(identity, specifier);
-      }
+    const identity = realpath(declaration);
+    const previous = importsByDeclaration.get(identity);
+    if (previous === undefined || specifier < previous) {
+      importsByDeclaration.set(identity, specifier);
     }
   }
 
