@@ -428,4 +428,102 @@ describe('Plugin declaration generation', () => {
     expect(output).toBe('export {};\n');
     expect(stats.plugins).toBe(0);
   });
+
+  const failReading = (suffix: string) => {
+    const readFile = ts.sys.readFile;
+    return jest
+      .spyOn(ts.sys, 'readFile')
+      .mockImplementation((filename, encoding) =>
+        filename.endsWith(suffix) ? undefined : readFile(filename, encoding)
+      );
+  };
+
+  it('imports a plugin that @strapi/strapi/strict-types names when that file cannot be read', async () => {
+    write('node_modules/@strapi/strapi/package.json', {
+      name: '@strapi/strapi',
+      exports: { './strict-types': { types: './strict-types.d.ts' } },
+      typesVersions: { '*': { 'strict-types': ['strict-types.d.ts'] } },
+    });
+    write(
+      'node_modules/@strapi/strapi/strict-types.d.ts',
+      '/// <reference types="bundled-plugin/strapi-server" preserve="true" />\nexport {};\n'
+    );
+    dependencies['@strapi/strapi'] = '1.0.0';
+    install('bundled', 'bundled-plugin');
+    const readFile = failReading('/@strapi/strapi/strict-types.d.ts');
+
+    try {
+      const { output, stats } = await generatePlugins();
+      expect(output).toBe("import type {} from 'bundled-plugin/strapi-server';\n");
+      expect(stats.plugins).toBe(1);
+    } finally {
+      readFile.mockRestore();
+    }
+  });
+
+  it('imports without a warning a plugin server declaration that cannot be read', async () => {
+    const plugin = install('unreadable', '@vendor/unreadable');
+    fs.writeFileSync(
+      path.join(plugin.pathToPlugin, 'dist/server/index.d.ts'),
+      "import type {} from '@strapi/strapi/strict-types';\nexport {};\n"
+    );
+    const logger = createLogger({ silent: true });
+    const warn = jest.spyOn(logger, 'warn');
+    const readFile = failReading('/@vendor/unreadable/dist/server/index.d.ts');
+
+    try {
+      const { output } = await generatePluginDefinitions({
+        strapi: strapi(),
+        appDir,
+        pwd: path.join(appDir, 'types/generated'),
+        logger,
+      });
+      expect(output).toBe("import type {} from '@vendor/unreadable/strapi-server';\n");
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      readFile.mockRestore();
+    }
+  });
+
+  it('identifies declarations by their resolved path when the host has no realpath', async () => {
+    const zebra = install('zebra', '@vendor/zebra');
+    enabledPlugins['another-zebra'] = zebra;
+    loadedPlugins['another-zebra'] = {};
+    install('local', '@vendor/local', { directory: 'src/plugins/local', legacy: false });
+    delete dependencies['@vendor/local'];
+    const { realpath } = ts.sys;
+    ts.sys.realpath = undefined;
+
+    try {
+      const { output, stats } = await generatePlugins();
+      expect(output).toBe(
+        "import type {} from '../../src/plugins/local/dist/server/index.d.ts';\nimport type {} from '@vendor/zebra/strapi-server';\n"
+      );
+      expect(stats.plugins).toBe(2);
+    } finally {
+      ts.sys.realpath = realpath;
+    }
+  });
+
+  it('skips a fallback declaration whose relative import the app resolves to another file', async () => {
+    write('tsconfig.json', {
+      compilerOptions: {
+        module: 'CommonJS',
+        moduleResolution: 'Node',
+        moduleSuffixes: ['.ios', ''],
+        types: [],
+      },
+    });
+    const plugin = install('suffixed', '@vendor/suffixed', { legacy: false });
+    write(
+      path.relative(appDir, path.join(plugin.pathToPlugin, 'dist/server/index.ios.d.ts')),
+      'export {};'
+    );
+
+    // Node10 ignores package exports, and the app resolves the relative import of
+    // `dist/server/index.d.ts` to `dist/server/index.ios.d.ts`
+    const { output, stats } = await generatePlugins();
+    expect(output).toBe('export {};\n');
+    expect(stats.plugins).toBe(0);
+  });
 });
