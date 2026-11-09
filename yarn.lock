@@ -10806,6 +10806,7 @@ __metadata:
     "@types/json-logic-js": "npm:2.0.8"
     "@types/koa": "npm:2.15.2"
     "@types/koa__router": "npm:12.0.0"
+    "@types/lodash": "npm:^4.14.191"
     "@types/node": "npm:22.20.0"
     commander: "npm:8.3.0"
     croner: "npm:10.0.1"
@@ -10820,6 +10821,8 @@ __metadata:
     typedoc-plugin-markdown: "npm:4.11.0"
     typescript: "npm:5.9.3"
     undici: "npm:8.12.4"
+    vitest: "catalog:"
+    vitest-config: "npm:5.61.0"
     zod: "npm:4.4.3"
   languageName: unknown
   linkType: soft
