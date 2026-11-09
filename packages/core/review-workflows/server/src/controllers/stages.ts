@@ -1,16 +1,20 @@
 import type { Context } from 'koa';
-import type { Core } from '@strapi/types';
+import type { Core, Modules } from '@strapi/types';
 import type { Services as ContentManagerServices } from '@strapi/content-manager/strapi-server';
 
 import { async } from '@strapi/utils';
 import { getService } from '../utils';
 import type { StageWithPermissions } from '../services/stage-permissions';
+import type { PopulatedWorkflow } from '../types/services';
 import { validateUpdateStageOnEntity, validateLocale } from '../validation/review-workflows';
 import {
   STAGE_MODEL_UID,
   ENTITY_STAGE_ATTRIBUTE,
   STAGE_TRANSITION_UID,
 } from '../constants/workflows';
+
+/** A document read with its review workflow stage populated: `null` when the entry has no stage. */
+type DocumentWithStage = Modules.Documents.AnyDocument & { strapi_stage?: { id: number } | null };
 
 type UserAbility = Parameters<
   ContentManagerServices.PermissionCheckerService['create']
@@ -101,7 +105,7 @@ export default {
 
     // Load entity
     const locale = await validateLocale(query?.locale);
-    const entity = await strapi.documents(modelUID).findOne({
+    const entity: DocumentWithStage | null = await strapi.documents(modelUID).findOne({
       documentId,
       // @ts-expect-error - locale should be also null in the doc service types
       locale,
@@ -173,7 +177,11 @@ export default {
 
     // Load entity
     const locale = (await validateLocale(query?.locale)) ?? undefined;
-    const [entity, workflowCount, workflowResult] = await Promise.all([
+    const [entity, workflowCount, workflowResult]: [
+      DocumentWithStage | null,
+      number,
+      PopulatedWorkflow<{ stages: { populate: { permissions: { populate: ['role'] } } } }> | null,
+    ] = await Promise.all([
       strapi.documents(modelUID).findOne({
         documentId,
         locale,
