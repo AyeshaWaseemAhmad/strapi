@@ -1,23 +1,6 @@
 import type { Core } from '@strapi/types';
-import type { ProviderCapabilities } from '../../shared/types';
-import type { EmailConfig, SendOptions } from './types';
-
-interface EmailProvider {
-  send: (options: SendOptions) => Promise<any>;
-  verify?: () => Promise<boolean>;
-  isIdle?: () => boolean;
-  close?: () => void;
-  getCapabilities?: () => ProviderCapabilities;
-}
-
-interface EmailProviderModule {
-  init: (
-    options: EmailConfig['providerOptions'],
-    settings: EmailConfig['settings']
-  ) => EmailProvider;
-  name?: string;
-  provider?: string;
-}
+import type { EmailConfig } from './types';
+import type { EmailProviderModule } from './types/providers';
 
 const createProvider = (emailConfig: EmailConfig) => {
   const providerName = emailConfig.provider.toLowerCase();
