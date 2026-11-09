@@ -1,68 +1,45 @@
+import type { Core } from '@strapi/types';
+
 import createHomepageService from '../homepage';
 
-const createStrapi = (pages: Array<Array<{ id: number }>>) => {
-  const calls: Array<{ filters: Record<string, unknown>; limit?: number }> = [];
+const release = (id: number, scheduledAt: string | null) => ({ id, scheduledAt });
 
-  return {
-    calls,
-    strapi: {
-      db: {
-        query: () => ({
-          findMany: jest.fn(async (params: { filters: Record<string, unknown> }) => {
-            calls.push(params);
-            return pages[calls.length - 1] ?? [];
-          }),
-        }),
-      },
-    },
-  };
+const setup = (unscheduled: unknown[], scheduled: unknown[]) => {
+  const findMany = jest.fn(async ({ filters, limit }) =>
+    (filters.scheduledAt.$notNull ? scheduled : unscheduled).slice(0, limit)
+  );
+  const strapi = { db: { query: () => ({ findMany }) } } as unknown as Core.Strapi;
+
+  return { service: createHomepageService({ strapi }), findMany };
 };
 
-describe('homepage.getUpcomingReleases', () => {
-  it('asks the scheduled query to skip releases already returned', async () => {
-    const { calls, strapi } = createStrapi([[{ id: 1 }, { id: 3 }], [{ id: 2 }]]);
-    const service = createHomepageService({ strapi } as any);
+const date = '2024-01-08T00:00:00.000Z';
 
-    await expect(service.getUpcomingReleases()).resolves.toEqual([{ id: 1 }, { id: 3 }, { id: 2 }]);
-    expect(calls[1].filters.id).toEqual({ $notIn: [1, 3] });
-  });
-
-  it('does not add an empty id exclusion when nothing is unscheduled', async () => {
-    const { calls, strapi } = createStrapi([[], [{ id: 4 }]]);
-    const service = createHomepageService({ strapi } as any);
-
-    await expect(service.getUpcomingReleases()).resolves.toEqual([{ id: 4 }]);
-    expect(calls[1].filters.id).toBeUndefined();
-  });
-
-  it('returns four unscheduled releases without asking for scheduled ones', async () => {
-    const { calls, strapi } = createStrapi([[{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }]]);
-    const service = createHomepageService({ strapi } as any);
-
-    await expect(service.getUpcomingReleases()).resolves.toEqual([
-      { id: 1 },
-      { id: 2 },
-      { id: 3 },
-      { id: 4 },
-    ]);
-    expect(calls).toHaveLength(1);
-  });
-
-  it('uses the remaining slots for scheduled releases and excludes the ones already listed', async () => {
-    const { calls, strapi } = createStrapi([[{ id: 1 }, { id: 2 }, { id: 3 }], [{ id: 5 }]]);
-    const service = createHomepageService({ strapi } as any);
-
-    await expect(service.getUpcomingReleases()).resolves.toEqual([
-      { id: 1 },
-      { id: 2 },
-      { id: 3 },
-      { id: 5 },
-    ]);
-    expect(calls[1]).toEqual(
-      expect.objectContaining({
-        limit: 1,
-        filters: expect.objectContaining({ id: { $notIn: [1, 2, 3] } }),
-      })
+describe('Homepage service', () => {
+  it('lists scheduled releases first even when four undated releases exist', async () => {
+    const { service } = setup(
+      [1, 2, 3, 4].map((id) => release(id, null)),
+      [release(5, date)]
     );
+
+    expect((await service.getUpcomingReleases()).map(({ id }) => id)).toEqual([5, 1, 2, 3]);
+  });
+
+  it('fills the remaining slots with undated releases after scheduled ones', async () => {
+    const { service } = setup(
+      [1, 2].map((id) => release(id, null)),
+      [release(3, date)]
+    );
+
+    expect((await service.getUpcomingReleases()).map(({ id }) => id)).toEqual([3, 1, 2]);
+  });
+
+  it('caps the list at four scheduled releases', async () => {
+    const { service } = setup(
+      [1].map((id) => release(id, null)),
+      [2, 3, 4, 5, 6].map((id) => release(id, date))
+    );
+
+    expect((await service.getUpcomingReleases()).map(({ id }) => id)).toEqual([2, 3, 4, 5]);
   });
 });

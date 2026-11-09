@@ -5,37 +5,34 @@ import type { GetUpcomingReleases } from '../../../shared/contracts/homepage';
 const createHomepageService = ({ strapi }: { strapi: Core.Strapi }) => {
   const MAX_DOCUMENTS = 4;
 
+  // Pending releases, tie-broken by `id` so the order is stable across DBs/engines.
+  // (E2E and the admin widget assume a predictable first row — see with-admin seed.)
+  const findPendingReleases = (
+    scheduled: boolean,
+    orderBy: Record<string, 'asc'>[],
+    limit: number
+  ) =>
+    strapi.db.query('plugin::content-releases.release').findMany({
+      filters: {
+        releasedAt: { $notNull: false },
+        scheduledAt: { $notNull: scheduled },
+      },
+      orderBy: [...orderBy, { id: 'asc' }],
+      limit,
+    });
+
   return {
     async getUpcomingReleases(): Promise<GetUpcomingReleases.Response['data']> {
-      // Postgres sorts nulls last in ASC. Unscheduled releases are the predictable
-      // first rows (the homepage widget and API tests), then the soonest schedule.
-      const unscheduled = await strapi.db.query('plugin::content-releases.release').findMany({
-        filters: {
-          releasedAt: { $notNull: false },
-          scheduledAt: { $null: true },
-        },
-        orderBy: { id: 'asc' },
-        limit: MAX_DOCUMENTS,
-      });
+      // Scheduled releases first (soonest first), then fill the remaining slots with undated ones.
+      // Two queries because each database sorts nulls its own way.
+      const scheduled = await findPendingReleases(true, [{ scheduledAt: 'asc' }], MAX_DOCUMENTS);
+      const remaining = MAX_DOCUMENTS - scheduled.length;
 
-      if (unscheduled.length >= MAX_DOCUMENTS) {
-        return unscheduled;
+      if (remaining === 0) {
+        return scheduled;
       }
 
-      const seenIds = unscheduled.map((release) => release.id);
-      const scheduled = await strapi.db.query('plugin::content-releases.release').findMany({
-        filters: {
-          releasedAt: { $notNull: false },
-          scheduledAt: { $notNull: true },
-          // A release can be scheduled between these two queries. Leave out the
-          // ids already returned so it is not listed twice.
-          ...(seenIds.length > 0 ? { id: { $notIn: seenIds } } : {}),
-        },
-        orderBy: [{ scheduledAt: 'asc' }, { id: 'asc' }],
-        limit: MAX_DOCUMENTS - unscheduled.length,
-      });
-
-      return [...unscheduled, ...scheduled];
+      return [...scheduled, ...(await findPendingReleases(false, [], remaining))];
     },
   };
 };
