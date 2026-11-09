@@ -149,6 +149,14 @@ declare global {
       interface InferredServices {}
 
       /**
+       * The provider a package sets on its plugin (`strapi.plugin(name).provider`), keyed by plugin
+       * name. With strict types enabled, `provider` of a listed plugin resolves to its entry; other
+       * plugins keep the `any` of their unregistered members.
+       */
+      // eslint-disable-next-line @typescript-eslint/no-empty-interface
+      interface PackagePluginProviders {}
+
+      /**
        * Resolved configuration contracts supplied by Strapi and plugin packages, keyed by
        * config namespace (e.g. `'plugin::my-plugin'`).
        * Application entries in {@link AppConfigs} take precedence over these contracts.

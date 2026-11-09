@@ -180,6 +180,12 @@ type StrictPluginConfigGetter<TName extends string> = {
   ): PluginConfigLookup<TName, TKey, NoInfer<T>, NoInfer<TArgs[0]>>;
 };
 
+/** The provider registered for the plugin, if any; otherwise `provider` stays on the index. */
+type StrictPluginProvider<TName extends string> =
+  TName extends keyof Strapi.Registries.PackagePluginProviders
+    ? { provider: Strapi.Registries.PackagePluginProviders[TName] }
+    : unknown;
+
 /**
  * The `Module` members of a plugin. With strict types enabled, the lookups and `config` are the
  * plugin's own.
@@ -222,7 +228,8 @@ type PluginMembers<TName extends string> = IsStrict extends false
       [key: string]: any;
     } & StrictPluginConfigGetter<TName> &
       StrictPluginPolicyGetter<TName> &
-      StrictPluginMiddlewareGetter<TName>;
+      StrictPluginMiddlewareGetter<TName> &
+      StrictPluginProvider<TName>;
 
 /**
  * The loaded plugin `TName`. With strict types enabled, a literal `TName` types its lookups and maps
