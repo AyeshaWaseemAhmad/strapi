@@ -14,7 +14,7 @@ const { getScalarAttributes, getMediaAttributes } = contentTypes;
 export interface DocumentVersion {
   id: string | number;
   documentId: Modules.Documents.ID;
-  locale?: string;
+  locale?: Core.IsStrict extends true ? string | null : string;
   localizations?: DocumentVersion[];
   updatedAt?: string | null | Date;
   publishedAt?: string | null | Date;
