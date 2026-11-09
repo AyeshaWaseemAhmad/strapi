@@ -152,7 +152,8 @@ const createHomepageService = ({ strapi }: { strapi: Core.Strapi }) => {
   };
 
   const formatDocuments = (
-    documents: Modules.Documents.AnyDocument[],
+    // A recent document's `locale` is a string for a localized type, `null` otherwise
+    documents: (Modules.Documents.AnyDocument & { locale?: string | null })[],
     meta: ContentTypeMeta,
     populate?: string[]
   ) => {
